@@ -3,7 +3,7 @@
 Build a CLIP-based vector index of all images in iCloudPhotos and iCloudPhotos1,
 persisted into a local LanceDB vector database.
 
-Model: openai/clip-vit-base-patch32 (512-dim embeddings)
+Model: configured via config.toml
 """
 
 import sys
