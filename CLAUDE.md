@@ -16,6 +16,9 @@ TRANSFORMERS_VERBOSITY=error .mymedia/bin/python <script.py>
 
 # Rebuild the CLIP vector index from scratch
 TRANSFORMERS_VERBOSITY=error .mymedia/bin/python build_clip_index.py
+
+# Start the search web app (http://localhost:8000)
+TRANSFORMERS_VERBOSITY=error .mymedia/bin/python app.py
 ```
 
 ## Project structure
@@ -23,6 +26,7 @@ TRANSFORMERS_VERBOSITY=error .mymedia/bin/python build_clip_index.py
 | Path | Purpose |
 |---|---|
 | `build_clip_index.py` | Scans image dirs, runs CLIP inference, writes LanceDB index |
+| `app.py` | FastAPI web app — text search UI served on port 8000 |
 | `config.toml` | All tuneable parameters (dirs, model, batch size, etc.) |
 | `data/iCloudPhotos/` | First iCloud photo export (~800 files) |
 | `data/iCloudPhotos1/` | Second iCloud photo export (~880 files) |
