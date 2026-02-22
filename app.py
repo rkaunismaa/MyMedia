@@ -5,14 +5,17 @@ Run:  TRANSFORMERS_VERBOSITY=error .mymedia/bin/python app.py
 Then open: http://localhost:8000
 """
 
+import io
 import tomllib
+import zipfile
 from pathlib import Path
 
 import lancedb
 import torch
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from transformers import CLIPModel, CLIPProcessor
 
 # ── Config ───────────────────────────────────────────────────────────────────
@@ -87,6 +90,37 @@ def serve_image(path: str):
     if not p.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(str(p))
+
+
+class DownloadRequest(BaseModel):
+    paths: list[str]
+
+
+@app.post("/download")
+def download_zip(req: DownloadRequest):
+    """Zip the requested image files and return as a download."""
+    data_root = (BASE_DIR / "data").resolve()
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        seen = set()
+        for raw in req.paths:
+            p = Path(raw).resolve()
+            if not str(p).startswith(str(data_root)):
+                continue
+            if not p.is_file():
+                continue
+            # Avoid duplicate filenames in the archive
+            name = p.name
+            if name in seen:
+                name = f"{p.parent.name}_{name}"
+            seen.add(name)
+            zf.write(p, name)
+    buf.seek(0)
+    return StreamingResponse(
+        buf,
+        media_type="application/zip",
+        headers={"Content-Disposition": "attachment; filename=selected_images.zip"},
+    )
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -221,6 +255,31 @@ HTML = """<!DOCTYPE html>
 
   .card.hidden { display: none; }
 
+  .card.selected { outline: 3px solid #2ecc71; outline-offset: -3px; }
+
+  .select-btn {
+    position: absolute;
+    top: .4rem; left: .4rem;
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,.55);
+    background: rgba(0,0,0,.45);
+    color: transparent;
+    font-size: 1rem;
+    line-height: 26px;
+    text-align: center;
+    cursor: pointer;
+    z-index: 2;
+    transition: background .15s, border-color .15s, color .15s;
+    padding: 0;
+  }
+  .select-btn:hover { border-color: #fff; background: rgba(0,0,0,.65); }
+  .card.selected .select-btn {
+    background: #2ecc71;
+    border-color: #2ecc71;
+    color: #fff;
+  }
+
   /* Threshold slider */
   .threshold-row {
     display: flex;
@@ -248,6 +307,20 @@ HTML = """<!DOCTYPE html>
     cursor: pointer;
   }
   #threshold-val { color: #7cf; font-weight: 700; min-width: 2.5rem; }
+
+  #save-btn {
+    padding: .3rem .8rem;
+    border-radius: 6px;
+    border: none;
+    background: #2ecc71;
+    color: #fff;
+    font-size: .82rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background .2s;
+  }
+  #save-btn:hover:not(:disabled)  { background: #27ae60; }
+  #save-btn:disabled { background: #2a4a36; color: #555; cursor: default; }
 
   /* Lightbox */
   #lightbox {
@@ -354,6 +427,8 @@ HTML = """<!DOCTYPE html>
     <input type="range" id="threshold" min="0" max="0.5" step="0.01" value="0">
     <span id="threshold-val">0.00</span>
     &nbsp;(<span id="visible-count">0</span> shown)
+    &nbsp;&nbsp;
+    <button id="save-btn" onclick="saveSelected()" disabled>Save Images (0)</button>
   </div>
 </header>
 
@@ -380,9 +455,12 @@ HTML = """<!DOCTYPE html>
   const thresholdEl  = document.getElementById('threshold');
   const thresholdVal = document.getElementById('threshold-val');
   const visibleCount = document.getElementById('visible-count');
+  const saveBtn      = document.getElementById('save-btn');
 
-  let allCards       = [];
-  let currentLbIndex = -1;
+  let allCards        = [];
+  let allPaths        = [];
+  let selectedIndices = new Set();
+  let currentLbIndex  = -1;
 
   input.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
   document.addEventListener('keydown', e => {
@@ -417,6 +495,8 @@ HTML = """<!DOCTYPE html>
     spinner.classList.add('active');
     btn.disabled = true;
     status.textContent = '';
+    selectedIndices.clear();
+    updateSaveBtn();
 
     try {
       const res  = await fetch(`/search?q=${encodeURIComponent(q)}&n=${n}`);
@@ -433,6 +513,9 @@ HTML = """<!DOCTYPE html>
 
       status.textContent = `${data.results.length} fetched`;
       allCards = [];
+      allPaths = [];
+      selectedIndices.clear();
+      updateSaveBtn();
 
       data.results.forEach((hit, i) => {
         const imgUrl = `/image?path=${encodeURIComponent(hit.path)}`;
@@ -440,12 +523,18 @@ HTML = """<!DOCTYPE html>
         card.className = 'card';
         card.dataset.score = hit.score;
         card.innerHTML = `
+          <button class="select-btn" title="Select">&#10003;</button>
           <img src="${imgUrl}" loading="lazy" alt="${hit.filename}">
           <div class="label">${hit.filename}</div>
           <div class="score-badge">${hit.score}</div>
         `;
         card.querySelector('img').addEventListener('click', () => openLightbox(i));
+        card.querySelector('.select-btn').addEventListener('click', e => {
+          e.stopPropagation();
+          toggleSelect(i);
+        });
         allCards.push(card);
+        allPaths.push(hit.path);
         grid.appendChild(card);
       });
 
@@ -456,6 +545,45 @@ HTML = """<!DOCTYPE html>
       spinner.classList.remove('active');
       btn.disabled = false;
       status.textContent = 'Error: ' + err.message;
+    }
+  }
+
+  function toggleSelect(i) {
+    if (selectedIndices.has(i)) {
+      selectedIndices.delete(i);
+      allCards[i].classList.remove('selected');
+    } else {
+      selectedIndices.add(i);
+      allCards[i].classList.add('selected');
+    }
+    updateSaveBtn();
+  }
+
+  function updateSaveBtn() {
+    const n = selectedIndices.size;
+    saveBtn.disabled = n === 0;
+    saveBtn.textContent = `Save Images (${n})`;
+  }
+
+  async function saveSelected() {
+    const paths = [...selectedIndices].map(i => allPaths[i]);
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Zipping…';
+    try {
+      const res = await fetch('/download', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({paths}),
+      });
+      const blob = await res.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = 'selected_images.zip';
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      updateSaveBtn();
     }
   }
 
