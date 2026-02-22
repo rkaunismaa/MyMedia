@@ -278,6 +278,33 @@ HTML = """<!DOCTYPE html>
     user-select: none;
   }
 
+  .lb-arrow {
+    position: absolute;
+    top: 50%; transform: translateY(-50%);
+    background: rgba(0,0,0,.5);
+    color: #fff;
+    border: none;
+    font-size: 2.2rem;
+    line-height: 1;
+    padding: .6rem .9rem;
+    border-radius: 8px;
+    cursor: pointer;
+    user-select: none;
+    transition: background .15s;
+    z-index: 101;
+  }
+  .lb-arrow:hover { background: rgba(255,255,255,.15); }
+  #lb-prev { left:  1rem; }
+  #lb-next { right: 1rem; }
+
+  #lb-counter {
+    position: absolute;
+    bottom: 1rem; left: 50%; transform: translateX(-50%);
+    color: rgba(255,255,255,.6);
+    font-size: .85rem;
+    user-select: none;
+  }
+
   .spinner {
     display: none;
     width: 32px; height: 32px;
@@ -335,7 +362,10 @@ HTML = """<!DOCTYPE html>
 
 <div id="lightbox" onclick="closeLightbox()">
   <span id="lightbox-close" onclick="closeLightbox()">&#x2715;</span>
+  <button class="lb-arrow" id="lb-prev" onclick="event.stopPropagation(); lbNavigate(-1)">&#8249;</button>
   <img id="lightbox-img" src="" onclick="event.stopPropagation()">
+  <button class="lb-arrow" id="lb-next" onclick="event.stopPropagation(); lbNavigate(1)">&#8250;</button>
+  <div id="lb-counter"></div>
 </div>
 
 <script>
@@ -346,12 +376,20 @@ HTML = """<!DOCTYPE html>
   const btn          = document.getElementById('search-btn');
   const lb           = document.getElementById('lightbox');
   const lbImg        = document.getElementById('lightbox-img');
+  const lbCounter    = document.getElementById('lb-counter');
   const thresholdEl  = document.getElementById('threshold');
   const thresholdVal = document.getElementById('threshold-val');
   const visibleCount = document.getElementById('visible-count');
 
+  let allCards       = [];
+  let currentLbIndex = -1;
+
   input.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape')      closeLightbox();
+    if (e.key === 'ArrowRight')  lbNavigate(1);
+    if (e.key === 'ArrowLeft')   lbNavigate(-1);
+  });
 
   thresholdEl.addEventListener('input', () => {
     const min = parseFloat(thresholdEl.value);
@@ -394,8 +432,9 @@ HTML = """<!DOCTYPE html>
       }
 
       status.textContent = `${data.results.length} fetched`;
+      allCards = [];
 
-      data.results.forEach(hit => {
+      data.results.forEach((hit, i) => {
         const imgUrl = `/image?path=${encodeURIComponent(hit.path)}`;
         const card   = document.createElement('div');
         card.className = 'card';
@@ -405,7 +444,8 @@ HTML = """<!DOCTYPE html>
           <div class="label">${hit.filename}</div>
           <div class="score-badge">${hit.score}</div>
         `;
-        card.querySelector('img').addEventListener('click', () => openLightbox(imgUrl));
+        card.querySelector('img').addEventListener('click', () => openLightbox(i));
+        allCards.push(card);
         grid.appendChild(card);
       });
 
@@ -419,13 +459,35 @@ HTML = """<!DOCTYPE html>
     }
   }
 
-  function openLightbox(src) {
-    lbImg.src = src;
+  function visibleIndices() {
+    return allCards.reduce((acc, c, i) => {
+      if (!c.classList.contains('hidden')) acc.push(i);
+      return acc;
+    }, []);
+  }
+
+  function openLightbox(idx) {
+    currentLbIndex = idx;
+    lbImg.src = allCards[idx].querySelector('img').src;
+    const vis = visibleIndices();
+    const pos = vis.indexOf(idx);
+    lbCounter.textContent = pos >= 0 ? `${pos + 1} / ${vis.length}` : '';
     lb.classList.add('open');
   }
+
+  function lbNavigate(dir) {
+    if (currentLbIndex < 0) return;
+    const vis  = visibleIndices();
+    const pos  = vis.indexOf(currentLbIndex);
+    if (pos < 0) return;
+    const next = vis[(pos + dir + vis.length) % vis.length];
+    openLightbox(next);
+  }
+
   function closeLightbox() {
     lb.classList.remove('open');
     lbImg.src = '';
+    currentLbIndex = -1;
   }
 </script>
 </body>
