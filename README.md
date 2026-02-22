@@ -96,6 +96,14 @@ Open **http://localhost:8000** in your browser.
 - Each image shows its **cosine similarity score** as a badge
 - Click any image to open a **lightbox** — use the **‹ ›** arrows or **← →** keyboard keys to navigate, **Esc** to close
 
+### Saving images
+
+- Click the **✓ circle** in the top-left corner of any card to select it (green border)
+- Click again to deselect
+- Once one or more images are selected, the **Save Images (N)** button activates
+- Click it to download all selected images as a single `selected_images.zip`
+- Selection resets on each new search
+
 ---
 
 ## Project structure

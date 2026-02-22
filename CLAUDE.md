@@ -41,6 +41,7 @@ Changing `model_id` or `embed_dim` requires a full index rebuild. Current model 
 - Search uses `.bypass_vector_index()` for exact brute-force KNN (correct for this dataset size).
 - `/image?path=<abs_path>` serves image files; restricted to `data/` subtree to prevent path traversal.
 - Lightbox navigation (prev/next arrows and keyboard ←/→) only steps through cards currently visible above the threshold filter.
+- `POST /download` accepts `{"paths": [...]}`, zips the files in memory, and returns `selected_images.zip`. Duplicate filenames across source dirs are disambiguated by prefixing the parent directory name.
 
 ## LanceDB / indexing
 
