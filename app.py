@@ -43,7 +43,9 @@ app = FastAPI(title="MyMedia Image Search")
 
 @torch.inference_mode()
 def embed_text(query: str) -> list[float]:
-    inputs  = processor(text=[query], return_tensors="pt", padding=True).to(device)
+    # CLIP was trained with this template — it meaningfully improves retrieval quality
+    prompted = f"a photo of {query}"
+    inputs  = processor(text=[prompted], return_tensors="pt", padding=True).to(device)
     outputs = model.get_text_features(**inputs)
     features = outputs if isinstance(outputs, torch.Tensor) else outputs.pooler_output
     features = features / features.norm(dim=-1, keepdim=True)
@@ -56,6 +58,8 @@ def search(q: str = Query(..., min_length=1), n: int = Query(20, ge=1, le=100)):
     vector = embed_text(q)
     results = (
         table.search(vector)
+             .bypass_vector_index()  # exact brute-force search — correct for small dataset
+             .metric("cosine")
              .limit(n)
              .select(["path", "filename", "source_dir"])
              .to_arrow()
@@ -65,6 +69,7 @@ def search(q: str = Query(..., min_length=1), n: int = Query(20, ge=1, le=100)):
             "filename":   results.column("filename")[i].as_py(),
             "source_dir": results.column("source_dir")[i].as_py(),
             "path":       results.column("path")[i].as_py(),
+            "score":      round(1 - results.column("_distance")[i].as_py(), 4),
         }
         for i in range(len(results))
     ]
@@ -200,6 +205,7 @@ HTML = """<!DOCTYPE html>
     text-overflow: ellipsis;
   }
   .card:hover .label { opacity: 1; }
+  .score { color: #7cf; font-weight: 600; }
 
   /* Lightbox */
   #lightbox {
@@ -326,7 +332,7 @@ HTML = """<!DOCTYPE html>
         card.className = 'card';
         card.innerHTML = `
           <img src="${imgUrl}" loading="lazy" alt="${hit.filename}">
-          <div class="label">${hit.filename}</div>
+          <div class="label">${hit.filename} &nbsp;<span class="score">${hit.score}</span></div>
         `;
         card.querySelector('img').addEventListener('click', () => openLightbox(imgUrl));
         grid.appendChild(card);
