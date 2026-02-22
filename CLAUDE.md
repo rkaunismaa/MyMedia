@@ -5,16 +5,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Environment
 
 - **Python venv:** `.mymedia/` — always invoke as `.mymedia/bin/python`
+- **No pip in venv** — use `uv pip install <pkg> --python .mymedia/bin/python`
 - **GPU:** NVIDIA GeForce RTX 4090 with CUDA 12.6
-- **Key packages:** torch 2.10.0+cu126, lancedb 0.29.2, transformers 5.2.0, pyarrow (no pandas installed)
+- **Key packages:** torch 2.10.0+cu126, lancedb 0.29.2, transformers 5.2.0, fastapi, uvicorn, pyarrow (no pandas installed)
 
-## Running scripts
+## Commands
 
 ```bash
-# Standard invocation (suppresses noisy model-loading progress bars)
-TRANSFORMERS_VERBOSITY=error .mymedia/bin/python <script.py>
-
-# Rebuild the CLIP vector index from scratch
+# Rebuild the CLIP vector index from scratch (~2 min on RTX 4090)
 TRANSFORMERS_VERBOSITY=error .mymedia/bin/python build_clip_index.py
 
 # Start the search web app (http://localhost:8000)
@@ -26,22 +24,33 @@ TRANSFORMERS_VERBOSITY=error .mymedia/bin/python app.py
 | Path | Purpose |
 |---|---|
 | `build_clip_index.py` | Scans image dirs, runs CLIP inference, writes LanceDB index |
-| `app.py` | FastAPI web app — text search UI served on port 8000 |
-| `config.toml` | All tuneable parameters (dirs, model, batch size, etc.) |
-| `data/iCloudPhotos/` | First iCloud photo export (~800 files) |
-| `data/iCloudPhotos1/` | Second iCloud photo export (~880 files) |
-| `clip_index.lancedb/` | Persisted LanceDB vector database |
-| `.mymedia/` | Python virtual environment |
+| `app.py` | FastAPI web app — text search UI + image serving on port 8000 |
+| `config.toml` | All tuneable parameters (dirs, model ID, embed dim, batch size) |
+| `data/iCloudPhotos/` | First iCloud photo export |
+| `data/iCloudPhotos1/` | Second iCloud photo export |
+| `clip_index.lancedb/` | Persisted LanceDB vector database (gitignored) |
 
-## LanceDB index
+## config.toml
 
-- **Table:** `images`  **Dimensions:** 512  **Metric:** cosine
-- **Schema:** `path` (str), `filename` (str), `source_dir` (str), `vector` (float32[512])
-- Embeddings are L2-normalised, so cosine similarity equals dot product.
-- Use `pyarrow` (not pandas) to inspect table contents: `table.to_arrow().slice(0, n)`
+Changing `model_id` or `embed_dim` requires a full index rebuild. Current model is `openai/clip-vit-large-patch14` (768-dim). Both `build_clip_index.py` and `app.py` read this file at startup.
+
+## Web app (`app.py`)
+
+- Model and LanceDB table are loaded once at startup (~15s for large model).
+- Text queries are wrapped in `"a photo of {query}"` before encoding — this is intentional and matches CLIP's training distribution.
+- Search uses `.bypass_vector_index()` for exact brute-force KNN (correct for this dataset size).
+- `/image?path=<abs_path>` serves image files; restricted to `data/` subtree to prevent path traversal.
+- Lightbox navigation (prev/next arrows and keyboard ←/→) only steps through cards currently visible above the threshold filter.
+
+## LanceDB / indexing
+
+- **Table:** `images` &nbsp; **Metric:** cosine &nbsp; **Dimensions:** set by `embed_dim` in config
+- **Schema:** `path` (str), `filename` (str), `source_dir` (str), `vector` (float32[embed_dim])
+- Embeddings are L2-normalised at index time, so cosine similarity equals dot product.
+- Use `pyarrow` (not pandas) to inspect: `table.to_arrow().slice(0, n)`
+- `db.list_tables()` returns a result object — use `.tables` for membership: `name in db.list_tables().tables`
 
 ## Transformers 5.x quirks
 
-- `CLIPModel.get_image_features()` returns `BaseModelOutputWithPooling`, not a tensor. Extract the embedding via `.pooler_output` (already 512-dim, already projected).
-- `db.table_names()` is deprecated — use `db.list_tables()`.
-- `db.list_tables()` returns a result object, not a list — membership checks require `.tables`: `name in db.list_tables().tables`.
+- `CLIPModel.get_image_features()` and `get_text_features()` both return `BaseModelOutputWithPooling`, not a tensor. The projected embedding is in `.pooler_output`.
+- Suppress noisy model-loading output: `TRANSFORMERS_VERBOSITY=error`
