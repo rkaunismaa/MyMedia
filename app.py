@@ -195,6 +195,7 @@ HTML = """<!DOCTYPE html>
     position: absolute;
     bottom: 0; left: 0; right: 0;
     padding: .35rem .5rem;
+    padding-right: 3.2rem; /* leave room for score badge */
     background: linear-gradient(transparent, rgba(0,0,0,.75));
     font-size: .7rem;
     color: #ccc;
@@ -205,7 +206,48 @@ HTML = """<!DOCTYPE html>
     text-overflow: ellipsis;
   }
   .card:hover .label { opacity: 1; }
-  .score { color: #7cf; font-weight: 600; }
+
+  .score-badge {
+    position: absolute;
+    bottom: .35rem; right: .4rem;
+    background: rgba(0,0,0,.6);
+    color: #7cf;
+    font-size: .68rem;
+    font-weight: 700;
+    padding: .15rem .35rem;
+    border-radius: 4px;
+    pointer-events: none;
+  }
+
+  .card.hidden { display: none; }
+
+  /* Threshold slider */
+  .threshold-row {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    margin-top: .6rem;
+    justify-content: center;
+    font-size: .82rem;
+    color: #666;
+  }
+  #threshold {
+    -webkit-appearance: none;
+    width: 180px;
+    height: 4px;
+    border-radius: 2px;
+    background: #333;
+    outline: none;
+    cursor: pointer;
+  }
+  #threshold::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: #3a7bd5;
+    cursor: pointer;
+  }
+  #threshold-val { color: #7cf; font-weight: 700; min-width: 2.5rem; }
 
   /* Lightbox */
   #lightbox {
@@ -280,6 +322,12 @@ HTML = """<!DOCTYPE html>
     </select>
     &nbsp;<span id="status"></span>
   </div>
+  <div class="threshold-row">
+    Min score:
+    <input type="range" id="threshold" min="0" max="0.5" step="0.01" value="0">
+    <span id="threshold-val">0.00</span>
+    &nbsp;(<span id="visible-count">0</span> shown)
+  </div>
 </header>
 
 <div class="spinner" id="spinner"></div>
@@ -291,16 +339,36 @@ HTML = """<!DOCTYPE html>
 </div>
 
 <script>
-  const input   = document.getElementById('query');
-  const grid    = document.getElementById('grid');
-  const spinner = document.getElementById('spinner');
-  const status  = document.getElementById('status');
-  const btn     = document.getElementById('search-btn');
-  const lb      = document.getElementById('lightbox');
-  const lbImg   = document.getElementById('lightbox-img');
+  const input        = document.getElementById('query');
+  const grid         = document.getElementById('grid');
+  const spinner      = document.getElementById('spinner');
+  const status       = document.getElementById('status');
+  const btn          = document.getElementById('search-btn');
+  const lb           = document.getElementById('lightbox');
+  const lbImg        = document.getElementById('lightbox-img');
+  const thresholdEl  = document.getElementById('threshold');
+  const thresholdVal = document.getElementById('threshold-val');
+  const visibleCount = document.getElementById('visible-count');
 
   input.addEventListener('keydown', e => { if (e.key === 'Enter') doSearch(); });
   document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
+
+  thresholdEl.addEventListener('input', () => {
+    const min = parseFloat(thresholdEl.value);
+    thresholdVal.textContent = min.toFixed(2);
+    applyThreshold(min);
+  });
+
+  function applyThreshold(min) {
+    let shown = 0;
+    grid.querySelectorAll('.card').forEach(card => {
+      const score = parseFloat(card.dataset.score);
+      const hide  = score < min;
+      card.classList.toggle('hidden', hide);
+      if (!hide) shown++;
+    });
+    visibleCount.textContent = shown;
+  }
 
   async function doSearch() {
     const q = input.value.trim();
@@ -321,22 +389,28 @@ HTML = """<!DOCTYPE html>
 
       if (!data.results || data.results.length === 0) {
         status.textContent = 'No results.';
+        visibleCount.textContent = 0;
         return;
       }
 
-      status.textContent = `${data.results.length} result${data.results.length !== 1 ? 's' : ''}`;
+      status.textContent = `${data.results.length} fetched`;
 
       data.results.forEach(hit => {
         const imgUrl = `/image?path=${encodeURIComponent(hit.path)}`;
         const card   = document.createElement('div');
         card.className = 'card';
+        card.dataset.score = hit.score;
         card.innerHTML = `
           <img src="${imgUrl}" loading="lazy" alt="${hit.filename}">
-          <div class="label">${hit.filename} &nbsp;<span class="score">${hit.score}</span></div>
+          <div class="label">${hit.filename}</div>
+          <div class="score-badge">${hit.score}</div>
         `;
         card.querySelector('img').addEventListener('click', () => openLightbox(imgUrl));
         grid.appendChild(card);
       });
+
+      // Apply current threshold to newly rendered cards
+      applyThreshold(parseFloat(thresholdEl.value));
 
     } catch (err) {
       spinner.classList.remove('active');
