@@ -1,0 +1,10 @@
+[index]
+data_dirs        = ["data/iCloudPhotos", "data/iCloudPhotos1"]
+db_path          = "clip_index.lancedb"
+table_name       = "images"
+image_extensions = [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp", ".tiff", ".tif"]
+
+[model]
+model_id   = "openai/clip-vit-base-patch32"
+embed_dim  = 512
+batch_size = 32

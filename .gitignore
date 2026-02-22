@@ -1,0 +1,5 @@
+data/
+clip_index.lancedb/
+.mymedia/
+__pycache__/
+*.pyc
